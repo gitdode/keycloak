@@ -85,8 +85,8 @@ import org.keycloak.services.CorsErrorResponseException;
 import org.keycloak.services.ServicesLogger;
 import org.keycloak.services.Urls;
 import org.keycloak.services.clientpolicy.ClientPolicyException;
-import org.keycloak.services.clientpolicy.TokenRefreshContext;
-import org.keycloak.services.clientpolicy.TokenRequestContext;
+import org.keycloak.services.clientpolicy.context.TokenRefreshContext;
+import org.keycloak.services.clientpolicy.context.TokenRequestContext;
 import org.keycloak.services.managers.AppAuthManager;
 import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.managers.AuthenticationSessionManager;
@@ -263,7 +263,7 @@ public class TokenEndpoint {
     }
 
     private void checkClient() {
-        AuthorizeClientUtil.ClientAuthResult clientAuth = AuthorizeClientUtil.authorizeClient(session, event);
+        AuthorizeClientUtil.ClientAuthResult clientAuth = AuthorizeClientUtil.authorizeClient(session, event, cors);
         client = clientAuth.getClient();
         clientAuthAttributes = clientAuth.getClientAuthAttributes();
 
@@ -1244,8 +1244,10 @@ public class TokenEndpoint {
                     AccessToken invalidToken = new JWSInput(accessTokenString).readJsonContent(AccessToken.class);
                     ClientModel client = realm.getClientByClientId(invalidToken.getIssuedFor());
                     cors.allowedOrigins(session, client);
+                    event.client(client);
                 } catch (JWSInputException ignore) {
                 }
+                event.error(Errors.INVALID_TOKEN);
                 throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_GRANT, "Invalid bearer token", Status.UNAUTHORIZED);
             }
 
@@ -1254,6 +1256,7 @@ public class TokenEndpoint {
             session.getContext().setClient(client);
 
             cors.allowedOrigins(session, client);
+            event.client(client);
         }
 
         String claimToken = null;
@@ -1300,6 +1303,7 @@ public class TokenEndpoint {
         if (rpt != null) {
             AccessToken accessToken = session.tokens().decode(rpt, AccessToken.class);
             if (accessToken == null) {
+                event.error(Errors.INVALID_REQUEST);
                 throw new CorsErrorResponseException(cors, "invalid_rpt", "RPT signature is invalid", Status.FORBIDDEN);
             }
 
@@ -1307,8 +1311,11 @@ public class TokenEndpoint {
         }
 
         authorizationRequest.setScope(formParams.getFirst("scope"));
-        authorizationRequest.setAudience(formParams.getFirst("audience"));
+        String audienceParam = formParams.getFirst("audience");
+        authorizationRequest.setAudience(audienceParam);
         authorizationRequest.setSubjectToken(accessTokenString);
+
+        event.detail(Details.AUDIENCE, audienceParam);
 
         String submitRequest = formParams.getFirst("submit_request");
 
@@ -1318,6 +1325,7 @@ public class TokenEndpoint {
         List<String> permissions = formParams.get("permission");
 
         if (permissions != null) {
+            event.detail(Details.PERMISSION, String.join("|", permissions));
             for (String permission : permissions) {
                 String[] parts = permission.split("#");
                 String resource = parts[0];
@@ -1349,7 +1357,11 @@ public class TokenEndpoint {
 
         authorizationRequest.setMetadata(metadata);
 
-        return AuthorizationTokenService.instance().authorize(authorizationRequest);
+        Response authorizationResponse = AuthorizationTokenService.instance().authorize(authorizationRequest);
+
+        event.success();
+
+        return authorizationResponse;
     }
 
     // https://tools.ietf.org/html/rfc7636#section-4.1

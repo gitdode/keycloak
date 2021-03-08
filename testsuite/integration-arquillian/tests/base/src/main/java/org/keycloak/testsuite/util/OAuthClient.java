@@ -66,6 +66,7 @@ import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.IDToken;
 import org.keycloak.representations.JsonWebToken;
 import org.keycloak.representations.RefreshToken;
+import org.keycloak.representations.UserInfo;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.runonserver.RunOnServerException;
 import org.keycloak.util.BasicAuthHelper;
@@ -725,6 +726,9 @@ public class OAuthClient {
         } else if (clientId != null) {
             parameters.add(new BasicNameValuePair(OAuth2Constants.CLIENT_ID, clientId));
         }
+        if (origin != null) {
+            post.addHeader("Origin", origin);
+        }
 
         UrlEncodedFormEntity formEntity;
         try {
@@ -859,6 +863,18 @@ public class OAuthClient {
     public OIDCConfigurationRepresentation doWellKnownRequest(String realm) {
         try (CloseableHttpClient client = HttpClientBuilder.create().build()) {
             return SimpleHttp.doGet(baseUrl + "/realms/" + realm + "/.well-known/openid-configuration", client).asJson(OIDCConfigurationRepresentation.class);
+        } catch (IOException ex) {
+            throw new RuntimeException(ex);
+        }
+    }
+
+    public UserInfo doUserInfoRequest(String accessToken) {
+        try (CloseableHttpClient client = HttpClientBuilder.create().build()) {
+            HttpGet get = new HttpGet(getUserInfoUrl());
+            get.setHeader("Authorization", "Bearer " + accessToken);
+            try (CloseableHttpResponse response = client.execute(get)) {
+                return JsonSerialization.readValue(response.getEntity().getContent(), UserInfo.class);
+            }
         } catch (IOException ex) {
             throw new RuntimeException(ex);
         }
@@ -1115,6 +1131,11 @@ public class OAuthClient {
 
     public String getRefreshTokenUrl() {
         UriBuilder b = OIDCLoginProtocolService.tokenUrl(UriBuilder.fromUri(baseUrl));
+        return b.build(realm).toString();
+    }
+
+    public String getUserInfoUrl() {
+        UriBuilder b = OIDCLoginProtocolService.userInfoUrl(UriBuilder.fromUri(baseUrl));
         return b.build(realm).toString();
     }
 
